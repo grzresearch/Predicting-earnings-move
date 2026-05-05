@@ -24,12 +24,14 @@ from src.visualization.plots import (
     plot_historical_moves,
     plot_options_analysis,
     plot_probability_cone,
-    plot_confidence_gauge
+    plot_confidence_gauge,
+    plot_orderbook_3d_surface,
 )
 
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def generate_sample_plots():
@@ -149,6 +151,45 @@ def generate_sample_plots():
         save_path=str(output_dir / 'confidence_gauge.png')
     )
     plt.close(fig6)
+
+    # 7. 3D Order Book Surface
+    print("    - 3D order book surface plot...")
+    rng = np.random.default_rng(42)
+    strikes = list(np.arange(160.0, 200.0, 2.5))
+    # Liquidity peaks near ATM (around current_price=178.50, atm_strike=180)
+    distances = np.array([abs(s - atm_strike) for s in strikes])
+    base_oi = np.exp(-(distances ** 2) / (2 * 6.0 ** 2)) * 9000
+    base_vol = np.exp(-(distances ** 2) / (2 * 5.0 ** 2)) * 4500
+    # Calls a touch heavier on upside, puts heavier on downside (skew toward calls = bullish)
+    call_oi = [int(base_oi[i] * (1.1 if strikes[i] >= atm_strike else 0.7) + rng.integers(0, 400))
+               for i in range(len(strikes))]
+    put_oi = [int(base_oi[i] * (1.0 if strikes[i] <= atm_strike else 0.55) + rng.integers(0, 400))
+              for i in range(len(strikes))]
+    call_vol = [int(base_vol[i] * (1.2 if strikes[i] >= atm_strike else 0.6) + rng.integers(0, 200))
+                for i in range(len(strikes))]
+    put_vol = [int(base_vol[i] * (0.9 if strikes[i] <= atm_strike else 0.5) + rng.integers(0, 200))
+               for i in range(len(strikes))]
+    # IV smile: higher on wings
+    call_iv_list = [atm_iv + 0.0008 * (s - atm_strike) ** 2 for s in strikes]
+    put_iv_list = [atm_iv + 0.0010 * (s - atm_strike) ** 2 + 0.02 for s in strikes]
+
+    fig7 = plot_orderbook_3d_surface(
+        symbol=symbol,
+        current_price=current_price,
+        expected_range=expected_range,
+        predicted_direction=predicted_direction,
+        strikes=strikes,
+        call_oi=call_oi,
+        put_oi=put_oi,
+        call_volume=call_vol,
+        put_volume=put_vol,
+        call_iv=call_iv_list,
+        put_iv=put_iv_list,
+        max_pain_strike=max_pain_strike,
+        direction_confidence=direction_confidence,
+        save_path=str(output_dir / 'orderbook_3d_surface.png')
+    )
+    plt.close(fig7)
 
     print(f"\nAll plots saved to: {output_dir}")
     print("\nGenerated files:")

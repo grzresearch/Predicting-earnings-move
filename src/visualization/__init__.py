@@ -9,6 +9,7 @@ from .plots import (
     plot_options_analysis,
     plot_probability_cone,
     plot_confidence_gauge,
+    plot_orderbook_3d_surface,
     create_prediction_dashboard,
     save_prediction_plots
 )
@@ -20,6 +21,7 @@ __all__ = [
     'plot_options_analysis',
     'plot_probability_cone',
     'plot_confidence_gauge',
+    'plot_orderbook_3d_surface',
     'create_prediction_dashboard',
     'save_prediction_plots'
 ]

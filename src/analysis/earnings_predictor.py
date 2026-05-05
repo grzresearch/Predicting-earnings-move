@@ -47,6 +47,9 @@ class EarningsPrediction:
     iv_percentile: float = 0
     iv_rank: float = 0
 
+    # Raw option chain (used by 3D order book visualization)
+    option_chain: Optional[OptionChain] = None
+
     # Flow analysis
     option_flows: List[OptionFlow] = field(default_factory=list)
     flow_sentiment: str = "neutral"
@@ -396,6 +399,7 @@ class EarningsPredictor:
             options_metrics=options_metrics,
             iv_percentile=iv_percentile,
             iv_rank=iv_rank,
+            option_chain=chain,
             option_flows=flows,
             flow_sentiment=flow_sentiment,
             net_premium=net_premium,

@@ -8,6 +8,8 @@ historical context, and options analysis.
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import FancyBboxPatch, Wedge
+from matplotlib import cm
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers 3d projection)
 import numpy as np
 from typing import Optional, List, Dict, Tuple, Any
 from pathlib import Path
@@ -660,6 +662,203 @@ def plot_confidence_gauge(
     return fig
 
 
+def plot_orderbook_3d_surface(
+    symbol: str,
+    current_price: float,
+    expected_range: Tuple[float, float],
+    predicted_direction: str,
+    strikes: List[float],
+    call_oi: List[float],
+    put_oi: List[float],
+    call_volume: Optional[List[float]] = None,
+    put_volume: Optional[List[float]] = None,
+    call_iv: Optional[List[float]] = None,
+    put_iv: Optional[List[float]] = None,
+    max_pain_strike: Optional[float] = None,
+    direction_confidence: float = 0.5,
+    save_path: Optional[str] = None,
+    figsize: Tuple[int, int] = (14, 9)
+) -> plt.Figure:
+    """
+    Plot a 3D surface of the option chain order book with prediction overlay.
+
+    The surface shows liquidity (open interest + volume) across strikes for
+    both call and put sides. Vertical translucent planes mark the current
+    price, the expected move range, the max pain level and the predicted
+    target — visualising how the prediction passes through the order book.
+
+    Axes:
+      X = strike price
+      Y = order book side (negative = puts, positive = calls)
+      Z = liquidity (open interest, optionally augmented by volume)
+
+    Args:
+        symbol: Stock symbol
+        current_price: Current underlying price
+        expected_range: (lower_bound, upper_bound) of expected move
+        predicted_direction: 'up', 'down', or 'neutral'
+        strikes: Sorted list of strike prices
+        call_oi: Open interest per strike for calls (same length as strikes)
+        put_oi: Open interest per strike for puts (same length as strikes)
+        call_volume: Optional call volume per strike
+        put_volume: Optional put volume per strike
+        call_iv: Optional call implied volatility per strike (used for color)
+        put_iv: Optional put implied volatility per strike (used for color)
+        max_pain_strike: Optional max pain strike to highlight
+        direction_confidence: Direction confidence (0-1) — affects target wall opacity
+        save_path: Optional path to save the figure
+        figsize: Figure size tuple
+
+    Returns:
+        matplotlib Figure object
+    """
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(111, projection='3d')
+
+    if not strikes:
+        ax.text2D(0.5, 0.5, 'No option chain data available',
+                  ha='center', va='center', fontsize=14, transform=ax.transAxes)
+        if save_path:
+            fig.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        return fig
+
+    strikes_arr = np.asarray(strikes, dtype=float)
+    call_oi_arr = np.asarray(call_oi, dtype=float)
+    put_oi_arr = np.asarray(put_oi, dtype=float)
+
+    # Combine OI with volume (if given) to form a richer "liquidity" surface
+    call_liq = call_oi_arr.copy()
+    put_liq = put_oi_arr.copy()
+    if call_volume is not None:
+        call_liq = call_liq + np.asarray(call_volume, dtype=float)
+    if put_volume is not None:
+        put_liq = put_liq + np.asarray(put_volume, dtype=float)
+
+    # Build a smooth Y-axis grid: -1 (deep put side) -> 0 (mid) -> +1 (deep call side)
+    n_y = 21
+    y_grid = np.linspace(-1.0, 1.0, n_y)
+    X, Y = np.meshgrid(strikes_arr, y_grid)
+
+    # Z = put liquidity for Y<0, call liquidity for Y>0, taper to 0 at Y=0.
+    # Use abs(Y) as a depth weight so the surface peaks at the outer edges
+    # (representing the "wall" of liquidity on each side of the book).
+    Z = np.zeros_like(X)
+    weight = np.abs(Y)
+    # Broadcast: each row is one Y level
+    call_row = call_liq[np.newaxis, :]  # shape (1, n_strikes)
+    put_row = put_liq[np.newaxis, :]
+    side_call = (Y > 0).astype(float)
+    side_put = (Y < 0).astype(float)
+    Z = weight * (side_call * call_row + side_put * put_row)
+
+    # Color by IV if provided, else by Z
+    if call_iv is not None and put_iv is not None:
+        call_iv_arr = np.asarray(call_iv, dtype=float)
+        put_iv_arr = np.asarray(put_iv, dtype=float)
+        iv_surface = (
+            side_call * call_iv_arr[np.newaxis, :]
+            + side_put * put_iv_arr[np.newaxis, :]
+        )
+        # Normalize IV for colormap
+        iv_max = float(np.nanmax(iv_surface)) if np.nanmax(iv_surface) > 0 else 1.0
+        facecolors = cm.plasma(iv_surface / iv_max)
+        surf = ax.plot_surface(
+            X, Y, Z,
+            facecolors=facecolors,
+            rstride=1, cstride=1,
+            linewidth=0, antialiased=True, alpha=0.85, shade=False
+        )
+        mappable = cm.ScalarMappable(cmap=cm.plasma)
+        mappable.set_array(iv_surface)
+        cbar = fig.colorbar(mappable, ax=ax, shrink=0.5, pad=0.1)
+        cbar.set_label('Implied Volatility', fontsize=10)
+    else:
+        surf = ax.plot_surface(
+            X, Y, Z,
+            cmap=cm.viridis,
+            rstride=1, cstride=1,
+            linewidth=0, antialiased=True, alpha=0.85
+        )
+        cbar = fig.colorbar(surf, ax=ax, shrink=0.5, pad=0.1)
+        cbar.set_label('Liquidity (OI + Volume)', fontsize=10)
+
+    z_max = float(np.nanmax(Z)) if np.nanmax(Z) > 0 else 1.0
+
+    # --- Prediction overlay: vertical translucent planes through the book ---
+    def _vertical_plane(x_val: float, color: str, alpha: float, label: str,
+                        linestyle: str = '-', linewidth: float = 2.0):
+        yy, zz = np.meshgrid(np.linspace(-1.0, 1.0, 2), np.linspace(0, z_max * 1.05, 2))
+        xx = np.full_like(yy, x_val)
+        ax.plot_surface(xx, yy, zz, color=color, alpha=alpha,
+                        shade=False, linewidth=0)
+        # Outline at top edge so the wall reads as a labeled marker
+        ax.plot([x_val, x_val], [-1.0, 1.0], [z_max * 1.05, z_max * 1.05],
+                color=color, linewidth=linewidth, linestyle=linestyle, label=label)
+
+    lower, upper = expected_range
+
+    # Expected range "tunnel" — translucent bands on lower and upper bounds
+    _vertical_plane(lower, '#e74c3c', 0.18, f'Lower: ${lower:.2f}', linestyle='--')
+    _vertical_plane(upper, '#27ae60', 0.18, f'Upper: ${upper:.2f}', linestyle='--')
+
+    # Current price wall
+    _vertical_plane(current_price, '#2c3e50', 0.30,
+                    f'Current: ${current_price:.2f}', linewidth=2.5)
+
+    # Max pain
+    if max_pain_strike is not None and max_pain_strike > 0:
+        _vertical_plane(max_pain_strike, '#9b59b6', 0.18,
+                        f'Max Pain: ${max_pain_strike:.2f}', linestyle=':')
+
+    # Predicted target — a wall biased toward upper or lower bound
+    direction_color = {'up': '#27ae60', 'down': '#e74c3c', 'neutral': '#f39c12'}[predicted_direction]
+    if predicted_direction == 'up':
+        target = current_price + (upper - current_price) * direction_confidence
+    elif predicted_direction == 'down':
+        target = current_price - (current_price - lower) * direction_confidence
+    else:
+        target = current_price
+    _vertical_plane(target, direction_color, 0.35,
+                    f'Predicted ({predicted_direction.upper()}): ${target:.2f}',
+                    linewidth=3.0)
+
+    # Direction arrow drawn above the order book surface
+    arrow_z = z_max * 1.15
+    if predicted_direction in ('up', 'down'):
+        ax.quiver(
+            current_price, 0, arrow_z,
+            target - current_price, 0, 0,
+            color=direction_color, linewidth=3, arrow_length_ratio=0.15
+        )
+        ax.text(
+            (current_price + target) / 2, 0, arrow_z * 1.05,
+            f'{predicted_direction.upper()} {direction_confidence*100:.0f}%',
+            color=direction_color, fontsize=11, fontweight='bold', ha='center'
+        )
+
+    # Axis styling
+    ax.set_xlabel('Strike Price ($)', fontsize=11, labelpad=10)
+    ax.set_ylabel('Order Book Side', fontsize=11, labelpad=10)
+    ax.set_zlabel('Liquidity (OI + Volume)', fontsize=11, labelpad=10)
+    ax.set_yticks([-1.0, -0.5, 0.0, 0.5, 1.0])
+    ax.set_yticklabels(['Puts', '', 'ATM', '', 'Calls'])
+    ax.set_title(
+        f'{symbol} Option Chain Order Book — Prediction Surface\n'
+        f'Predicted: {predicted_direction.upper()} '
+        f'(${target:.2f}, conf {direction_confidence*100:.0f}%)',
+        fontsize=14, fontweight='bold', pad=20
+    )
+    ax.view_init(elev=28, azim=-58)
+    ax.legend(loc='upper left', fontsize=8, framealpha=0.85)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+
+    return fig
+
+
 def create_prediction_dashboard(
     prediction,
     save_dir: Optional[str] = None,
@@ -742,6 +941,37 @@ def create_prediction_dashboard(
         data_sources=prediction.data_sources_used,
         save_path=os.path.join(save_dir, f'{prediction.symbol}_confidence.png') if save_dir else None
     )
+
+    # 7. 3D Order Book Surface (when chain data is available)
+    chain = getattr(prediction, 'option_chain', None)
+    if chain is not None and getattr(chain, 'calls', None) and getattr(chain, 'puts', None):
+        strike_set = sorted({c.strike for c in chain.calls} | {p.strike for p in chain.puts})
+        call_by_strike = {c.strike: c for c in chain.calls}
+        put_by_strike = {p.strike: p for p in chain.puts}
+
+        call_oi = [call_by_strike[s].open_interest if s in call_by_strike else 0 for s in strike_set]
+        put_oi = [put_by_strike[s].open_interest if s in put_by_strike else 0 for s in strike_set]
+        call_vol = [call_by_strike[s].volume if s in call_by_strike else 0 for s in strike_set]
+        put_vol = [put_by_strike[s].volume if s in put_by_strike else 0 for s in strike_set]
+        call_iv_list = [call_by_strike[s].implied_volatility if s in call_by_strike else 0 for s in strike_set]
+        put_iv_list = [put_by_strike[s].implied_volatility if s in put_by_strike else 0 for s in strike_set]
+
+        figures['orderbook_3d'] = plot_orderbook_3d_surface(
+            symbol=prediction.symbol,
+            current_price=prediction.current_price,
+            expected_range=prediction.expected_range,
+            predicted_direction=prediction.predicted_direction,
+            strikes=strike_set,
+            call_oi=call_oi,
+            put_oi=put_oi,
+            call_volume=call_vol,
+            put_volume=put_vol,
+            call_iv=call_iv_list,
+            put_iv=put_iv_list,
+            max_pain_strike=prediction.options_metrics.max_pain_strike if prediction.options_metrics else None,
+            direction_confidence=prediction.direction_confidence,
+            save_path=os.path.join(save_dir, f'{prediction.symbol}_orderbook_3d.png') if save_dir else None
+        )
 
     if show:
         plt.show()

@@ -204,6 +204,22 @@ Shows overall prediction confidence and direction certainty.
 
 ---
 
+### 3D Order Book Prediction Surface
+
+Visualizes how the prediction passes through the option chain order book.
+
+![3D Order Book Surface](examples/plots/orderbook_3d_surface.png)
+
+**What it shows:**
+- **X-axis**: Strike prices across the chain
+- **Y-axis**: Order book side (puts on the negative side, calls on the positive side)
+- **Z-axis**: Liquidity per strike (open interest + volume) — the "mountain" of the order book
+- **Surface coloring**: Implied volatility per strike/side (purple = low IV, yellow = high IV → reveals the IV smile)
+- **Translucent walls**: Vertical planes pierce the surface at the current price, expected lower/upper bounds, max pain and the predicted target
+- **Direction arrow**: A 3D arrow above the surface points from the current price to the predicted target with confidence percentage
+
+---
+
 ### Generating Visualizations
 
 #### Command Line
@@ -242,7 +258,8 @@ from src.visualization import (
     plot_historical_moves,
     plot_options_analysis,
     plot_probability_cone,
-    plot_confidence_gauge
+    plot_confidence_gauge,
+    plot_orderbook_3d_surface,
 )
 
 # Generate specific plots
