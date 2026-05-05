@@ -2,22 +2,20 @@
 """
 Build the 3D Order Book Prediction Surface from REAL option-chain data.
 
-Uses the repo's YahooFinanceSource to pull a live option chain for a liquid
-ticker that has earnings coming up soon, runs the full EarningsPredictor
-pipeline against it, then renders plot_orderbook_3d_surface.
+Two modes:
 
-Usage:
-    # Auto-pick the first liquid ticker from a watch list whose earnings
-    # fall inside the next `--max-days` days:
-    python examples/realtime_orderbook_surface.py
+  Live mode (default) — fetches a live chain via YahooFinanceSource:
+      python examples/realtime_orderbook_surface.py
+      python examples/realtime_orderbook_surface.py --symbol NVDA
 
-    # Force a specific symbol (skips the watch-list scan):
-    python examples/realtime_orderbook_surface.py --symbol NVDA
+  Snapshot mode — re-renders the PNG from a JSON snapshot produced by an
+  earlier live run. Useful when the host running the visualisation has no
+  outbound network access:
+      python examples/realtime_orderbook_surface.py \
+          --from-snapshot examples/plots/NVDA_orderbook_3d_surface.json
 
-    # Custom output directory:
-    python examples/realtime_orderbook_surface.py --output-dir ./my_plots
-
-Requires outbound network access to Yahoo Finance (yfinance).
+Each live run also writes the JSON snapshot next to the PNG so the figure
+stays reproducible after the chain moves.
 """
 
 import argparse
@@ -33,8 +31,6 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from src.analysis.earnings_predictor import EarningsPredictor
-from src.data_sources.free_sources import YahooFinanceSource
 from src.visualization.plots import plot_orderbook_3d_surface
 
 
@@ -53,6 +49,7 @@ def find_liquid_ticker_with_upcoming_earnings(
     """Scan `candidates` for the first symbol whose next earnings is within
     `max_days_ahead` days AND whose post-earnings option chain shows enough
     open interest to be worth visualising."""
+    from src.data_sources.free_sources import YahooFinanceSource
     yahoo = YahooFinanceSource()
     today = date.today()
     horizon = today + timedelta(days=max_days_ahead)
@@ -95,19 +92,35 @@ def find_liquid_ticker_with_upcoming_earnings(
     return None, None, None
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--symbol', help='Force a specific symbol')
-    parser.add_argument('--output-dir', default=str(Path(__file__).parent / 'plots'),
-                        help='Where to write the PNG and JSON snapshot')
-    parser.add_argument('--max-days', type=int, default=60,
-                        help='Earnings must fall within this many days (auto mode)')
-    args = parser.parse_args()
+def render_from_payload(payload: dict, output_dir: Path) -> Path:
+    """Render the 3D surface from an already-collected payload (dict)."""
+    symbol = payload['symbol']
+    png_path = output_dir / f'{symbol}_orderbook_3d_surface.png'
+    fig = plot_orderbook_3d_surface(
+        symbol=symbol,
+        current_price=float(payload['underlying_price']),
+        expected_range=tuple(payload['expected_range']),
+        predicted_direction=payload['predicted_direction'],
+        strikes=[float(s) for s in payload['strikes']],
+        call_oi=[float(v) for v in payload['call_oi']],
+        put_oi=[float(v) for v in payload['put_oi']],
+        call_volume=[float(v) for v in payload.get('call_volume') or []] or None,
+        put_volume=[float(v) for v in payload.get('put_volume') or []] or None,
+        call_iv=[float(v) for v in payload.get('call_iv') or []] or None,
+        put_iv=[float(v) for v in payload.get('put_iv') or []] or None,
+        max_pain_strike=float(payload['max_pain_strike']) if payload.get('max_pain_strike') is not None else None,
+        direction_confidence=float(payload.get('direction_confidence', 0.5)),
+        save_path=str(png_path),
+    )
+    plt.close(fig)
+    return png_path
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Selecting ticker with real, liquid option chain and upcoming earnings...")
+def run_live(args, output_dir: Path) -> dict:
+    """Fetch a live chain, build the prediction, render the PNG, return the snapshot dict."""
+    from src.analysis.earnings_predictor import EarningsPredictor
+    from src.data_sources.free_sources import YahooFinanceSource
+
     if args.symbol:
         yahoo = YahooFinanceSource()
         symbol = args.symbol.upper()
@@ -133,44 +146,14 @@ def main():
     print(f"  Underlying price: ${chain.underlying_price:.2f}")
     print(f"  Calls: {len(chain.calls)}, Puts: {len(chain.puts)}")
 
-    # Run the full predictor so direction/expected range come from the same data.
     predictor = EarningsPredictor(use_free_sources=True)
     prediction = predictor.predict(symbol)
 
-    # Pull per-strike series straight off the live chain.
     strike_set = sorted({c.strike for c in chain.calls} | {p.strike for p in chain.puts})
     call_by_strike = {c.strike: c for c in chain.calls}
     put_by_strike = {p.strike: p for p in chain.puts}
 
-    call_oi = [call_by_strike[s].open_interest if s in call_by_strike else 0 for s in strike_set]
-    put_oi = [put_by_strike[s].open_interest if s in put_by_strike else 0 for s in strike_set]
-    call_vol = [call_by_strike[s].volume if s in call_by_strike else 0 for s in strike_set]
-    put_vol = [put_by_strike[s].volume if s in put_by_strike else 0 for s in strike_set]
-    call_iv = [call_by_strike[s].implied_volatility if s in call_by_strike else 0 for s in strike_set]
-    put_iv = [put_by_strike[s].implied_volatility if s in put_by_strike else 0 for s in strike_set]
-
-    png_path = output_dir / f'{symbol}_orderbook_3d_surface.png'
-    fig = plot_orderbook_3d_surface(
-        symbol=symbol,
-        current_price=prediction.current_price,
-        expected_range=prediction.expected_range,
-        predicted_direction=prediction.predicted_direction,
-        strikes=strike_set,
-        call_oi=call_oi,
-        put_oi=put_oi,
-        call_volume=call_vol,
-        put_volume=put_vol,
-        call_iv=call_iv,
-        put_iv=put_iv,
-        max_pain_strike=prediction.options_metrics.max_pain_strike if prediction.options_metrics else None,
-        direction_confidence=prediction.direction_confidence,
-        save_path=str(png_path),
-    )
-    plt.close(fig)
-    print(f"\nPNG written: {png_path}")
-
-    # Snapshot the inputs so the figure stays reproducible after the chain moves.
-    snapshot = {
+    payload = {
         'symbol': symbol,
         'fetched_at': datetime.utcnow().isoformat() + 'Z',
         'earnings_date': earnings.earnings_date.isoformat() if earnings.earnings_date else None,
@@ -181,16 +164,50 @@ def main():
         'direction_confidence': prediction.direction_confidence,
         'max_pain_strike': prediction.options_metrics.max_pain_strike if prediction.options_metrics else None,
         'strikes': strike_set,
-        'call_oi': call_oi,
-        'put_oi': put_oi,
-        'call_volume': call_vol,
-        'put_volume': put_vol,
-        'call_iv': call_iv,
-        'put_iv': put_iv,
+        'call_oi': [call_by_strike[s].open_interest if s in call_by_strike else 0 for s in strike_set],
+        'put_oi': [put_by_strike[s].open_interest if s in put_by_strike else 0 for s in strike_set],
+        'call_volume': [call_by_strike[s].volume if s in call_by_strike else 0 for s in strike_set],
+        'put_volume': [put_by_strike[s].volume if s in put_by_strike else 0 for s in strike_set],
+        'call_iv': [call_by_strike[s].implied_volatility if s in call_by_strike else 0 for s in strike_set],
+        'put_iv': [put_by_strike[s].implied_volatility if s in put_by_strike else 0 for s in strike_set],
     }
+
+    png_path = render_from_payload(payload, output_dir)
+    print(f"\nPNG written: {png_path}")
+
     json_path = output_dir / f'{symbol}_orderbook_3d_surface.json'
-    json_path.write_text(json.dumps(snapshot, indent=2, default=str))
+    json_path.write_text(json.dumps(payload, indent=2, default=str))
     print(f"Snapshot written: {json_path}")
+
+    return payload
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--symbol', help='Force a specific symbol (live mode)')
+    parser.add_argument('--output-dir', default=str(Path(__file__).parent / 'plots'),
+                        help='Where to write the PNG and JSON snapshot')
+    parser.add_argument('--max-days', type=int, default=60,
+                        help='Earnings must fall within this many days (live, auto mode)')
+    parser.add_argument('--from-snapshot', type=Path,
+                        help='Render the PNG from a JSON snapshot instead of fetching live data')
+    args = parser.parse_args()
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.from_snapshot:
+        snapshot_path = Path(args.from_snapshot)
+        if not snapshot_path.exists():
+            sys.exit(f"Snapshot not found: {snapshot_path}")
+        payload = json.loads(snapshot_path.read_text())
+        print(f"Rendering {payload['symbol']} from snapshot {snapshot_path}")
+        png_path = render_from_payload(payload, output_dir)
+        print(f"PNG written: {png_path}")
+        return
+
+    print("Selecting ticker with real, liquid option chain and upcoming earnings...")
+    run_live(args, output_dir)
 
 
 if __name__ == '__main__':

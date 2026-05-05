@@ -223,15 +223,20 @@ Because the underlying option chain moves intra-day, the PNG is **not**
 checked in. Generate it from a machine that can reach Yahoo Finance:
 
 ```bash
-# Auto-pick the first liquid ticker (NVDA, TSLA, AAPL, ...) whose earnings
-# fall in the next 60 days; writes PNG and a JSON snapshot:
+# Live mode — auto-pick the first liquid ticker (NVDA, TSLA, AAPL, ...)
+# whose earnings fall in the next 60 days; writes PNG + JSON snapshot:
 python examples/realtime_orderbook_surface.py
 
 # Or force a specific symbol:
 python examples/realtime_orderbook_surface.py --symbol NVDA
+
+# Snapshot mode — re-render the PNG from a previously-saved JSON
+# (useful on a host without outbound network):
+python examples/realtime_orderbook_surface.py \
+    --from-snapshot examples/plots/NVDA_orderbook_3d_surface.json
 ```
 
-Each run writes
+Each live run writes
 `examples/plots/<SYMBOL>_orderbook_3d_surface.{png,json}`.
 
 ---
