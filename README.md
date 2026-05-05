@@ -207,8 +207,9 @@ Shows overall prediction confidence and direction certainty.
 ### 3D Order Book Prediction Surface
 
 Visualizes how the prediction passes through the **live** option chain order book.
-Built from real Yahoo Finance data — pick a liquid ticker with upcoming
-earnings and the script renders the surface from its actual chain.
+Built from real Yahoo Finance data — the script picks a liquid ticker with
+upcoming earnings and renders the surface from its actual chain at the
+moment the script is run (real-time prediction).
 
 **What it shows:**
 - **X-axis**: Strike prices across the live chain
@@ -223,15 +224,15 @@ checked in. Generate it from a machine that can reach Yahoo Finance:
 
 ```bash
 # Auto-pick the first liquid ticker (NVDA, TSLA, AAPL, ...) whose earnings
-# fall in the next 60 days:
+# fall in the next 60 days; writes PNG and a JSON snapshot:
 python examples/realtime_orderbook_surface.py
 
 # Or force a specific symbol:
 python examples/realtime_orderbook_surface.py --symbol NVDA
 ```
 
-Each run writes both a PNG and a JSON snapshot of the strike-level series
-to `examples/plots/<SYMBOL>_orderbook_3d_surface.{png,json}`.
+Each run writes
+`examples/plots/<SYMBOL>_orderbook_3d_surface.{png,json}`.
 
 ---
 
