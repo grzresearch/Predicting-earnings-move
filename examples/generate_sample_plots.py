@@ -24,7 +24,7 @@ from src.visualization.plots import (
     plot_historical_moves,
     plot_options_analysis,
     plot_probability_cone,
-    plot_confidence_gauge
+    plot_confidence_gauge,
 )
 
 import matplotlib
@@ -149,6 +149,10 @@ def generate_sample_plots():
         save_path=str(output_dir / 'confidence_gauge.png')
     )
     plt.close(fig6)
+
+    # The 3D order book prediction surface is built from real option-chain
+    # data and lives in examples/realtime_orderbook_surface.py — run that
+    # script (network access required) to regenerate its PNG.
 
     print(f"\nAll plots saved to: {output_dir}")
     print("\nGenerated files:")

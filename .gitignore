@@ -117,6 +117,7 @@ dmypy.json
 config/config.json
 *.json
 !config/*.example.json
+!examples/plots/*.json
 prediction_output.json
 cache/
 logs/

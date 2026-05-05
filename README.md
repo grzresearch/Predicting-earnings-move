@@ -204,6 +204,63 @@ Shows overall prediction confidence and direction certainty.
 
 ---
 
+### 3D Order Book Prediction Surface
+
+Visualizes how the prediction passes through a real option-chain order book.
+
+![3D Order Book Surface – NVDA pre-earnings](examples/plots/NVDA_orderbook_3d_surface.png)
+
+**Above:** NVDA on 2023-12-11, expiration 2024-03-15 (straddles NVDA's Q4
+FY24 earnings on 2024-02-21). Underlying $475.06, ATM straddle $77.76 →
+expected move ±16.37%. Source: real Yahoo Finance call quotes archived in
+[`dreamchef/Black-Scholes-options-pricing`](https://github.com/dreamchef/Black-Scholes-options-pricing/blob/main/data/calls_dataset.csv).
+Reproduce the figure with:
+
+```bash
+python examples/build_from_github_snapshot.py
+```
+
+> Data provenance for that figure: **real** Yahoo Finance fields are
+> strike / bid / ask / IV / underlying. **Derived** fields are puts (via
+> put-call parity P = C + K·e<sup>-rT</sup> − S, IV mirrored from the
+> call side because the dataset has no put quotes) and the per-strike
+> "liquidity" used for the Z-axis (mid / spread, capped — a market
+> micro-structure proxy, not real open interest or volume).
+
+**What it shows:**
+- **X-axis**: Strike prices across the real chain
+- **Y-axis**: Order book side (puts on the negative side, calls on the positive side)
+- **Z-axis**: Liquidity per strike (real OI + volume in live mode; tightness proxy in the GitHub-snapshot figure above)
+- **Surface coloring**: Implied volatility per strike/side (purple = low IV, yellow = high IV → reveals the IV smile)
+- **Translucent walls**: Vertical planes pierce the surface at the current price, expected lower/upper bounds, max pain and the predicted target
+- **Direction arrow**: A 3D arrow above the surface points from the current price to the predicted target with confidence percentage
+
+#### Generating from a fresh live chain
+
+The PNG above uses an archived snapshot so the README always renders
+something. To produce a figure from a *current* live chain (real OI and
+volume, real-time prediction), run on a host that can reach Yahoo
+Finance:
+
+```bash
+# Live mode — auto-pick the first liquid ticker (NVDA, TSLA, AAPL, ...)
+# whose earnings fall in the next 60 days; writes PNG + JSON snapshot:
+python examples/realtime_orderbook_surface.py
+
+# Or force a specific symbol:
+python examples/realtime_orderbook_surface.py --symbol NVDA
+
+# Snapshot mode — re-render the PNG from a previously-saved JSON
+# (useful on a host without outbound network):
+python examples/realtime_orderbook_surface.py \
+    --from-snapshot examples/plots/NVDA_orderbook_3d_surface.json
+```
+
+Each live run writes
+`examples/plots/<SYMBOL>_orderbook_3d_surface.{png,json}`.
+
+---
+
 ### Generating Visualizations
 
 #### Command Line
@@ -242,7 +299,8 @@ from src.visualization import (
     plot_historical_moves,
     plot_options_analysis,
     plot_probability_cone,
-    plot_confidence_gauge
+    plot_confidence_gauge,
+    plot_orderbook_3d_surface,
 )
 
 # Generate specific plots
