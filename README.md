@@ -1,6 +1,21 @@
 # Earnings Move Predictor
 
-A comprehensive Python tool for predicting stock movements after earnings announcements using options chain data, implied volatility analysis, and multiple data sources.
+A Python tool for predicting stock movements after earnings announcements using options chain data, implied volatility analysis, and multiple data sources. It derives the implied expected move from ATM straddle pricing, combines several options-market and historical signals into a direction prediction with a confidence score, and renders the results as text, tables, JSON or charts. Free data sources work without API keys; premium sources are optional.
+
+## Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Visualizations](#visualizations)
+- [Configuration](#configuration)
+- [How It Works](#how-it-works)
+- [Examples](#examples)
+- [Output Format](#output-format)
+- [Project Structure](#project-structure)
+- [Limitations](#limitations)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ## Features
 
@@ -20,13 +35,10 @@ A comprehensive Python tool for predicting stock movements after earnings announ
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/Predicting-earnings-move.git
-cd Predicting-earnings-move
+git clone https://github.com/grzresearch/predicting-earnings-move.git
+cd predicting-earnings-move
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Install the package
+# Install the package and its dependencies (from requirements.txt)
 pip install -e .
 ```
 
@@ -38,7 +50,9 @@ pip install -r requirements-premium.txt
 pip install -e ".[premium]"
 ```
 
-## Quick Start
+Development tools (pytest, black, flake8, mypy) are available as the `dev` extra: `pip install -e ".[dev]"`.
+
+## Usage
 
 ### Command Line Interface
 
@@ -250,16 +264,18 @@ python examples/realtime_orderbook_surface.py
 # Or force a specific symbol:
 python examples/realtime_orderbook_surface.py --symbol NVDA
 
-# Snapshot mode — re-render the PNG from a previously-saved JSON
-# (useful on a host without outbound network):
+# Snapshot mode — re-render the PNG from a JSON saved by a previous
+# live run (useful on a host without outbound network):
 python examples/realtime_orderbook_surface.py \
-    --from-snapshot examples/plots/NVDA_orderbook_3d_surface.json
+    --from-snapshot examples/plots/<SYMBOL>_orderbook_3d_surface.json
 ```
 
 Each live run writes
-`examples/plots/<SYMBOL>_orderbook_3d_surface.{png,json}`.
-
----
+`examples/plots/<SYMBOL>_orderbook_3d_surface.{png,json}`. The archived
+`examples/plots/NVDA_orderbook_3d_surface.json` is written by
+`examples/build_from_github_snapshot.py` in a different format and cannot
+be passed to `--from-snapshot`; regenerate that figure with
+`python examples/build_from_github_snapshot.py` instead.
 
 ### Generating Visualizations
 
@@ -333,12 +349,15 @@ POLYGON_API_KEY=your_key_here
 ALPHA_VANTAGE_API_KEY=your_key_here
 ```
 
+`.env.example` also lists the optional Interactive Brokers connection settings (`IB_HOST`, `IB_PORT`, `IB_CLIENT_ID`) and the logging and cache settings (`LOG_LEVEL`, `CACHE_ENABLED`, `CACHE_TTL`).
+
 ### Configuration File
 
-Copy and modify the example config:
+Copy and modify the example config, then pass it with `--config`:
 
 ```bash
 cp config/config.example.json config/config.json
+earnings-predict --config config/config.json status
 ```
 
 ## How It Works
@@ -378,45 +397,6 @@ Direction is predicted using multiple signals:
 - **Alpha Vantage**: Earnings estimates and historical data
 - **Interactive Brokers**: Real-time options chains
 
-## Project Structure
-
-```
-Predicting-earnings-move/
-├── src/
-│   ├── __init__.py
-│   ├── main.py                  # Main application & CLI
-│   ├── data_sources/
-│   │   ├── __init__.py
-│   │   ├── base.py              # Base classes
-│   │   ├── free_sources.py      # Free data sources
-│   │   └── premium_sources.py   # Premium API sources
-│   ├── analysis/
-│   │   ├── __init__.py
-│   │   ├── options_analyzer.py  # Options chain analysis
-│   │   ├── expected_move.py     # Expected move calculator
-│   │   └── earnings_predictor.py # Main prediction engine
-│   └── visualization/
-│       ├── __init__.py
-│       └── plots.py             # Visualization charts & plots
-├── examples/
-│   ├── basic_usage.py
-│   ├── advanced_usage.py
-│   ├── generate_sample_plots.py # Generate example plots
-│   └── plots/                   # Sample visualization outputs
-│       ├── expected_move_range.png
-│       ├── direction_signals.png
-│       ├── historical_moves.png
-│       ├── options_analysis.png
-│       ├── probability_cone.png
-│       └── confidence_gauge.png
-├── config/
-│   └── config.example.json
-├── requirements.txt
-├── requirements-premium.txt
-├── setup.py
-└── README.md
-```
-
 ## Examples
 
 ### Calculate IV-Based Expected Move
@@ -427,7 +407,7 @@ from src.analysis.expected_move import ExpectedMoveCalculator
 calc = ExpectedMoveCalculator()
 
 # Stock at $150 with 45% IV
-move_dollars, move_pct = calc.calculate_from_iv(150.0, 0.45, days=1)
+move_dollars, move_pct = calc.calculate_from_iv(150.0, 0.45, days_to_earnings=1)
 print(f"Expected Move: ±${move_dollars:.2f} (±{move_pct:.2f}%)")
 ```
 
@@ -492,6 +472,38 @@ Data Sources: Yahoo Finance, Nasdaq
 earnings-predict predict AAPL --format json
 ```
 
+## Project Structure
+
+```
+predicting-earnings-move/
+├── src/
+│   ├── main.py                  # Main application & CLI
+│   ├── data_sources/
+│   │   ├── base.py              # Base classes
+│   │   ├── free_sources.py      # Free data sources
+│   │   └── premium_sources.py   # Premium API sources
+│   ├── analysis/
+│   │   ├── options_analyzer.py  # Options chain analysis
+│   │   ├── expected_move.py     # Expected move calculator
+│   │   └── earnings_predictor.py # Main prediction engine
+│   └── visualization/
+│       └── plots.py             # Visualization charts & plots
+├── examples/
+│   ├── basic_usage.py
+│   ├── advanced_usage.py
+│   ├── generate_sample_plots.py        # Generate example plots
+│   ├── build_from_github_snapshot.py   # NVDA 3D surface from archived quotes
+│   ├── realtime_orderbook_surface.py   # 3D surface from a live chain
+│   └── plots/                          # Sample visualization outputs (PNG, JSON)
+├── config/
+│   └── config.example.json
+├── .env.example
+├── pyproject.toml               # Package metadata and earnings-predict command
+├── requirements.txt
+├── requirements-premium.txt
+└── README.md
+```
+
 ## Limitations
 
 - Options data may have delays (15-20 min for free sources)
@@ -499,14 +511,14 @@ earnings-predict predict AAPL --format json
 - Direction prediction is probabilistic, not guaranteed
 - Premium data sources provide better accuracy and speed
 
-## Contributing
-
-Contributions are welcome! Please read the contributing guidelines before submitting PRs.
-
-## License
-
-MIT License - see LICENSE file for details.
-
 ## Disclaimer
 
 This tool is for educational and informational purposes only. It does not constitute financial advice. Options trading involves significant risk of loss. Always do your own research and consult with a qualified financial advisor before making investment decisions.
+
+## License
+
+MIT License.
+
+## Contributing
+
+Contributions are welcome. Please open an issue or submit a pull request.
